@@ -3,20 +3,46 @@ import { createRoom, leaveRoomIfAny } from "../../services/room-manager.js";
 const queue = [];
 export default function setupMatchmaking(io, socket) {
   socket.on("joinQueue", () => {
+    console.log("[MATCHMAKING] Player joined queue:", socket.id);
     if (!queue.includes(socket.id)) queue.push(socket.id);
+    console.log("[MATCHMAKING] Queue size:", queue.length);
     attemptMatch(io);
   });
 
   socket.on("leaveQueue", () => {
+    console.log("[MATCHMAKING] Player left queue:", socket.id);
     const idx = queue.indexOf(socket.id);
     if (idx !== -1) queue.splice(idx, 1);
     leaveRoomIfAny(io, socket.id);
   });
 
   socket.on("ready", ({ roomId }) => {
-    const room = io.sockets.adapter.rooms.get(roomId);
+    console.log("[MATCHMAKING] Player ready:", socket.id, "Room:", roomId);
+    const room = createRoom.__rooms?.get(roomId);
+    if (room) {
+      room.setReady(socket.id);
+    } else {
+      console.warn("[MATCHMAKING] Room not found:", roomId);
+    }
+  });
 
-    socket.to(roomId).emit("playerReady", { id: socket.id });
+  socket.on("hit", ({ roomId, enemyId, word }) => {
+    // forward to room manager
+    const room = createRoom.__rooms?.get(roomId);
+    if (room) {
+      room.handleHit(socket.id, enemyId, word);
+    }
+  });
+
+  socket.on("requestRoomState", ({ roomId }) => {
+    const room = createRoom.__rooms?.get(roomId);
+    if (room) {
+      // send snapshot to requester only with THEIR enemies
+      socket.emit("roomState", {
+        enemies: room.serializeEnemies(socket.id),
+        players: room.serializePlayers(),
+      });
+    }
   });
 
   function attemptMatch(ioServer) {
@@ -24,7 +50,6 @@ export default function setupMatchmaking(io, socket) {
       const a = queue.shift();
       const b = queue.shift();
 
-      // guard against disconnected sockets
       const sa = ioServer.sockets.sockets.get(a);
       const sb = ioServer.sockets.sockets.get(b);
 
@@ -34,9 +59,10 @@ export default function setupMatchmaking(io, socket) {
         continue;
       }
 
+      console.log("[MATCHMAKING] Creating room for:", sa.id, "vs", sb.id);
       const room = createRoom(ioServer, sa, sb);
-      // createRoom already emits a `matchStart` event containing the battlefield
-      // but send a lighter-weight matchFound as well for backwards compatibility
+      console.log("[MATCHMAKING] Room created:", room.id);
+
       sa.emit("matchFound", {
         roomId: room.id,
         playerId: sa.id,
@@ -47,6 +73,8 @@ export default function setupMatchmaking(io, socket) {
         playerId: sb.id,
         opponentId: sa.id,
       });
+
+      console.log("[MATCHMAKING] Match found emitted to both players");
     }
   }
 }
