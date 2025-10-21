@@ -12,10 +12,14 @@ const io = new IOServer(server, {
 
 io.on("connection", (socket) => {
   console.log("socket connected", socket.id);
+
+  io.emit("onlineCount", io.engine.clientsCount);
+
   setupMatchmaking(io, socket);
 
   socket.on("disconnect", () => {
     console.log("socket disconnected", socket.id);
+    io.emit("onlineCount", io.engine.clientsCount);
   });
 });
 

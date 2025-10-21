@@ -57,7 +57,6 @@ function getDifficultyPhase(elapsedSec) {
 }
 
 function createEnemy(id, phase, ownerId) {
-  // Spawn on circle perimeter (like frontend) for consistent behavior
   const spawnRadius = 600 / 2 - 40; // match frontend: Math.min(width, height) / 2 - 40
   const angle = Math.random() * Math.PI * 2;
   const x = 300 + Math.cos(angle) * spawnRadius;
