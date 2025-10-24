@@ -211,6 +211,12 @@ function handleHit(room, playerId, enemyId, word) {
     by: playerId,
   });
 
+  room.io.to(room.id).emit("spectatorKilled", {
+    ownerId: player.id,
+    enemyId,
+    by: playerId,
+  });
+
   room.io.to(room.id).emit("playerStats", {
     playerId,
     heart: player.heart,
@@ -274,6 +280,10 @@ function startRoomTick(io, room) {
           });
           player.enemies.set(enemy.id, enemy);
           emitToPlayer(io, player.id, "spawnEnemy", enemy);
+          io.to(room.id).emit("enemySpawned", {
+            ownerId: player.id,
+            enemy,
+          });
           spawned = true;
         }
 
@@ -335,11 +345,27 @@ function startRoomTick(io, room) {
           updates: changed,
           t: now,
         });
+
+        io.to(room.id).emit("spectatorUpdate", {
+          ownerId: player.id,
+          updates: changed,
+          t: now,
+        });
       }
 
       if (reached.length > 0) {
         player.heart = Math.max(0, player.heart - reached.length);
         emitToPlayer(io, player.id, "enemyReached", { enemyIds: reached });
+
+        io.to(room.id).emit("spectatorReached", {
+          ownerId: player.id,
+          enemies: reached.map((id) => {
+            const enemy = player.enemies.get(id);
+            return enemy
+              ? { id, x: enemy.x, y: enemy.y, alive: false }
+              : { id, alive: false };
+          }),
+        });
 
         io.to(room.id).emit("playerStats", {
           playerId: player.id,
