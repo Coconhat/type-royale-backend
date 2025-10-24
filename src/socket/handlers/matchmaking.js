@@ -37,7 +37,7 @@ export default function setupMatchmaking(io, socket) {
   socket.on("requestRoomState", ({ roomId }) => {
     const room = createRoom.__rooms?.get(roomId);
     if (room) {
-      // send snapshot to requester only with THEIR enemies
+      // send snapshot of this player's battlefield slice
       socket.emit("roomState", {
         enemies: room.serializeEnemies(socket.id),
         players: room.serializePlayers(),
