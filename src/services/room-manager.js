@@ -56,8 +56,8 @@ function getDifficultyPhase(elapsedSec) {
   };
 }
 
-function createEnemy(id, phase, ownerId) {
-  const spawnRadius = 600 / 2 - 40; // match frontend: Math.min(width, height) / 2 - 40
+function createEnemy(id, phase, word) {
+  const spawnRadius = 600 / 2 - 40;
   const angle = Math.random() * Math.PI * 2;
   const x = 300 + Math.cos(angle) * spawnRadius;
   const y = 300 + Math.sin(angle) * spawnRadius;
@@ -68,7 +68,6 @@ function createEnemy(id, phase, ownerId) {
   const ux = dx / dist;
   const uy = dy / dist;
 
-  // Use phase-based speed with variety (like frontend)
   const [minSpeed, maxSpeed] = phase.speedRange;
   const baseSpeed = minSpeed + Math.random() * (maxSpeed - minSpeed);
   const varietyFactor = 1 + (Math.random() - 0.5) * phase.variety;
@@ -76,7 +75,7 @@ function createEnemy(id, phase, ownerId) {
 
   return {
     id,
-    word: allWords[Math.floor(Math.random() * allWords.length)],
+    word,
     x,
     y,
     ux,
@@ -105,7 +104,7 @@ export function createRoom(io, socketA, socketB) {
           ready: false,
           socketId: socketA.id,
           disconnected: false,
-          enemies: new Map(), // Each player has their own enemies
+          enemies: new Map(),
           nextEnemyId: 1,
           spawnCooldown: null,
         },
@@ -119,12 +118,15 @@ export function createRoom(io, socketA, socketB) {
           ready: false,
           socketId: socketB.id,
           disconnected: false,
-          enemies: new Map(), // Each player has their own enemies
+          enemies: new Map(),
           nextEnemyId: 1,
           spawnCooldown: null,
         },
       ],
     ]),
+
+    nextEnemyId: 1,
+    spawnCooldown: null,
     tickHandle: null,
     lastTick: Date.now(),
     started: false,
@@ -212,9 +214,7 @@ function setReady(room, playerId) {
     room.lastTick = Date.now();
 
     // Initialize spawn cooldown for each player
-    for (const [_playerId, player] of room.players) {
-      player.spawnCooldown = randRange(getDifficultyPhase(0).spawnInterval);
-    }
+    room.spawnCooldown = randRange(getDifficultyPhase(0).spawnInterval);
 
     room.tickHandle = startRoomTick(room.io, room);
 
@@ -297,7 +297,7 @@ function reassignPlayerSocket(room, oldId, newSocket) {
 }
 
 function startRoomTick(io, room) {
-  const TICK_MS = 60; // higher tick for smoother motion
+  const TICK_MS = 60;
   return setInterval(() => {
     const now = Date.now();
     const dt = Math.min(0.12, (now - room.lastTick) / 1000);
@@ -306,24 +306,52 @@ function startRoomTick(io, room) {
     const elapsedSec = Math.floor((now - room.createdAt) / 1000);
     const phase = getDifficultyPhase(elapsedSec);
 
-    // Process each player's enemies separately
-    for (const [playerId, player] of room.players) {
-      if (player.disconnected) continue;
+    // SYNCHRONIZED SPAWNING
+    if (room.started) {
+      room.spawnCooldown -= dt * 1000;
 
-      // Spawn logic for this player
-      if (room.started) {
-        player.spawnCooldown -= dt * 1000;
-        const aliveCount = Array.from(player.enemies.values()).filter(
-          (e) => e.alive
-        ).length;
-        const maxActive = phase.max;
-        if (player.spawnCooldown <= 0 && aliveCount < maxActive) {
-          const e = createEnemy(player.nextEnemyId++, phase);
-          player.enemies.set(e.id, e);
-          emitToPlayer(io, playerId, "spawnEnemy", e);
-          player.spawnCooldown = randRange(phase.spawnInterval);
+      if (room.spawnCooldown <= 0) {
+        // Check if any player can accept a new enemy
+        let anyPlayerCanSpawn = false;
+        for (const [_, player] of room.players) {
+          if (player.disconnected) continue;
+          const aliveCount = Array.from(player.enemies.values()).filter(
+            (e) => e.alive
+          ).length;
+          if (aliveCount < phase.max) {
+            anyPlayerCanSpawn = true;
+            break;
+          }
+        }
+
+        if (anyPlayerCanSpawn) {
+          const enemyId = room.nextEnemyId++;
+          const sharedWord =
+            allWords[Math.floor(Math.random() * allWords.length)];
+
+          // Create same enemy for each player with same ID and word
+          for (const [playerId, player] of room.players) {
+            if (player.disconnected) continue;
+
+            const aliveCount = Array.from(player.enemies.values()).filter(
+              (e) => e.alive
+            ).length;
+
+            if (aliveCount < phase.max) {
+              const e = createEnemy(enemyId, phase, sharedWord);
+              player.enemies.set(e.id, e);
+              emitToPlayer(io, playerId, "spawnEnemy", e);
+            }
+          }
+
+          room.spawnCooldown = randRange(phase.spawnInterval);
         }
       }
+    }
+
+    // Process each player's enemies SEPARATELY
+    for (const [playerId, player] of room.players) {
+      if (player.disconnected) continue;
 
       const changed = [];
       const reached = [];
@@ -336,9 +364,11 @@ function startRoomTick(io, room) {
           e._lastSentAlive = false;
           continue;
         }
+
         e.x += e.ux * e.baseSpeed * (dt * 60);
         e.y += e.uy * e.baseSpeed * (dt * 60);
         const d = Math.hypot(e.x - 300, e.y - 300);
+
         if (d <= 24) {
           e.alive = false;
           reached.push(e.id);
@@ -364,21 +394,23 @@ function startRoomTick(io, room) {
         emitToPlayer(io, playerId, "enemyUpdate", { updates: changed, t: now });
       }
 
+      // Handle reached enemies - damage this player only
       if (reached.length > 0) {
         player.heart = Math.max(0, (player.heart || 0) - reached.length);
         emitToPlayer(io, playerId, "enemyReached", { enemyIds: reached });
-        // Broadcast updated stats immediately
+
+        // Broadcast updated stats to both players
         io.to(room.id).emit("playerStats", {
           playerId,
           heart: player.heart,
           kills: player.kills,
         });
 
-        // Check if THIS player just lost (heart reached 0)
+        // Check if this player just lost (heart reached 0)
         if (player.heart <= 0) {
-          // Find the winner (the other player)
+          // Find the winner (the other player who is still alive)
           const winner = Array.from(room.players.values()).find(
-            (p) => p.id !== playerId
+            (p) => p.id !== playerId && p.heart > 0
           );
 
           // End the match immediately
@@ -391,12 +423,12 @@ function startRoomTick(io, room) {
 
           if (room.tickHandle) clearInterval(room.tickHandle);
           rooms.delete(room.id);
-          return; // Exit the interval callback
+          return; // Exit interval
         }
       }
     }
 
-    // Send full snapshot every ~3 seconds instead of 6% of ticks
+    // Full snapshot every ~3 seconds
     const ticksSinceSnapshot =
       (now - (room.lastSnapshot || room.createdAt)) / TICK_MS;
     if (ticksSinceSnapshot > 50) {
