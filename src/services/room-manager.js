@@ -82,7 +82,6 @@ function createEnemy(id, phase, word) {
     uy,
     baseSpeed: finalSpeed,
     alive: true,
-    ownerId, // Add owner tracking for debugging
     _lastSentX: null,
     _lastSentY: null,
     _lastSentAlive: null,
