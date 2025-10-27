@@ -5,7 +5,6 @@ import { Server as IOServer } from "socket.io";
 import setupMatchmaking from "./socket/handlers/matchmaking.js";
 import authRoutes from "./routes/auth.js";
 import "./config/database.js";
-import requireAuth from "./middleware/auth.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -15,7 +14,7 @@ app.use(cors());
 app.use(express.json());
 
 // API Routes
-app.use("/auth", requireAuth, authRoutes);
+app.use("/auth", authRoutes);
 
 // Health check endpoint
 app.get("/health", (req, res) => {
