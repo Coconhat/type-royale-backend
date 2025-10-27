@@ -29,7 +29,7 @@ router.post("/login", async (req, res) => {
 
     // Create JWT token
     const token = jwt.sign(
-      { id: user.id, email: user.email },
+      { id: user.id, email: user.email, username: user.username },
       process.env.JWT_SECRET,
       { expiresIn: "48h" }
     );
@@ -39,6 +39,7 @@ router.post("/login", async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
         highscore: user.highscore,
       },
     });
@@ -49,7 +50,7 @@ router.post("/login", async (req, res) => {
 });
 
 router.post("/signup", async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, username } = req.body;
 
   try {
     const result = await query("SELECT * FROM users WHERE email = $1", [email]);
@@ -59,14 +60,35 @@ router.post("/signup", async (req, res) => {
     }
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    const baseUsername = username?.trim() || email.split("@")[0] || "player";
+    const sanitizedUsername =
+      baseUsername.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 20) || "player";
+    let uniqueUsername = sanitizedUsername;
+
+    let attempts = 0;
+    while (attempts < 3) {
+      const usernameCheck = await query(
+        "SELECT 1 FROM users WHERE username = $1",
+        [uniqueUsername]
+      );
+      if (usernameCheck.rows.length === 0) break;
+      attempts += 1;
+      uniqueUsername = `${sanitizedUsername}${Math.floor(
+        Math.random() * 1000
+      )}`;
+    }
+    if (attempts === 3) {
+      uniqueUsername = `${sanitizedUsername}-${Date.now()}`;
+    }
+
     const insert = await query(
-      "INSERT INTO users (email, password, highscore) VALUES ($1, $2, $3) RETURNING id, email, highscore",
-      [email, hashedPassword, 0]
+      "INSERT INTO users (email, username, password, highscore) VALUES ($1, $2, $3, $4) RETURNING id, email, username, highscore",
+      [email, uniqueUsername, hashedPassword, 0]
     );
 
     const user = insert.rows[0];
     const token = jwt.sign(
-      { id: user.id, email: user.email },
+      { id: user.id, email: user.email, username: user.username },
       process.env.JWT_SECRET,
       { expiresIn: "24h" }
     );
@@ -75,6 +97,7 @@ router.post("/signup", async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
         highscore: user.highscore,
       },
     });
