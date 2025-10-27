@@ -51,6 +51,10 @@ const sendVerificationEmail = async ({ email, username, token }) => {
     );
     return;
   }
+  console.info("Sending verification email via Resend", {
+    email,
+    from: process.env.RESEND_FROM_EMAIL,
+  });
 
   try {
     await resend.emails.send({
@@ -62,6 +66,7 @@ const sendVerificationEmail = async ({ email, username, token }) => {
         <p>Welcome to Type Royale! Please verify your email address to activate your account.</p>
         <p><a href="${verificationUrl}">Click here to verify your email</a>.</p>
         <p>If you did not create this account, you can ignore this message.</p>
+    console.info("Verification email enqueued by Resend for", email);
       `,
     });
   } catch (error) {
