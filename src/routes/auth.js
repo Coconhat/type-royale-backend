@@ -17,7 +17,6 @@ const VERIFICATION_TTL_HOURS = Number(
   process.env.EMAIL_VERIFICATION_TTL_HOURS || 24
 );
 
-// Builds and sends a verification email via Resend; degrades gracefully if misconfigured.
 const sendVerificationEmail = async ({ email, username, token }) => {
   if (!resend) {
     console.warn(
@@ -51,13 +50,14 @@ const sendVerificationEmail = async ({ email, username, token }) => {
     );
     return;
   }
-  console.info("Sending verification email via Resend", {
-    email,
-    from: process.env.RESEND_FROM_EMAIL,
-  });
 
   try {
-    await resend.emails.send({
+    console.info("Sending verification email via Resend", {
+      email,
+      from: process.env.RESEND_FROM_EMAIL,
+    });
+
+    const { data, error } = await resend.emails.send({
       from: process.env.RESEND_FROM_EMAIL,
       to: email,
       subject: "Verify your Type Royale account",
@@ -66,8 +66,20 @@ const sendVerificationEmail = async ({ email, username, token }) => {
         <p>Welcome to Type Royale! Please verify your email address to activate your account.</p>
         <p><a href="${verificationUrl}">Click here to verify your email</a>.</p>
         <p>If you did not create this account, you can ignore this message.</p>
-    console.info("Verification email enqueued by Resend for", email);
       `,
+    });
+
+    if (error) {
+      console.error("Resend rejected verification email", {
+        email,
+        error: error.message || error,
+      });
+      return;
+    }
+
+    console.info("Verification email enqueued by Resend", {
+      email,
+      id: data?.id,
     });
   } catch (error) {
     console.error("Failed to send verification email via Resend", error);
